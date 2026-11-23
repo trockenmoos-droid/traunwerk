@@ -85,6 +85,28 @@ transcription. Assigning every voice from a mix is beyond v1.0.
   in the system code page.
 - Knob captions shrink to fit ("SCHWELLE", "ERHOLUNG").
 
+## 6. TRAUNFALL (added the same evening)
+
+The request was an "Autechre-style" switch. It is built as its own mode
+with its own name, not as an imitation of an artist. What it adds is what the
+sequencer was missing: control over time itself.
+
+- **WARP** puts each step x (0..1 of the bar) at
+  w(x) = x + a1·sin(2πx)/2π + a2·sin(4πx)/4π, with |a1|+|a2| ≤ 0.85·WARP.
+  The slope stays positive, so steps never swap places, and w(0)=0, w(1)=1,
+  so the bar never drifts against the host. a1 and a2 take a random walk
+  from bar to bar.
+- The first timing test detected onsets in the audio and failed in confusing
+  ways: hat crackle produced extra onsets, and warped steps came closer than
+  the detector could separate. It also exposed a real bug: **ghost notes left
+  over from an earlier session survived `prepareToPlay`**. Now they are
+  cleared. The test now reads trigger times from the engine's own sample
+  clock. Result: off = exactly straight; WARP 1 = intervals vary by 1.3
+  sixteenths, downbeats within 0.02 ms, 64 of 64 hats.
+- The engine's random generator now has a fixed seed, so a test run is
+  reproducible. Before that, one run in five or six failed somewhere on
+  chance alone, which would have made CI red for nothing.
+
 ## Numbers at release (one run of the render test)
 
 | Check | Result |
@@ -98,3 +120,4 @@ transcription. Assigning every voice from a mix is beyond v1.0.
 | BROTKRUMEN | 6 crumbs after 5 throws, exact return to crumb 0 |
 | ABDRUCK | 124.1 bpm (true 124); swing 0.20 → 0.12–0.20 over six runs |
 | 3 min torture run | finite, level constant, 7 % CPU |
+| TRAUNFALL | downbeats ±0.02 ms, 64/64 steps; STOTTERN 1: 47 ratchet hits on 32 steps; ZERFASERN: attack difference 0.00 → 0.2–0.4 |

@@ -36,7 +36,7 @@ namespace
         if (! ok) ++failures;
     }
 
-    struct Counts { int pattern = 0, ghost = 0, spore = 0, midi = 0; };
+    struct Counts { int pattern = 0, ghost = 0, spore = 0, midi = 0, ratchet = 0; std::vector<std::pair<int, int64_t>> times; };
 
     void drainHits (TraunwerkProcessor& p, Counts& c)
     {
@@ -47,7 +47,8 @@ namespace
             for (int i = st; i < st + n; ++i)
             {
                 const int k = p.engine.hitBuf[(size_t) i].kind;
-                (k == 0 ? c.pattern : k == 1 ? c.ghost : k == 2 ? c.spore : c.midi)++;
+                if (k == 0) c.times.push_back ({ p.engine.hitBuf[(size_t) i].voice, p.engine.hitBuf[(size_t) i].time });
+                (k == 0 ? c.pattern : k == 1 ? c.ghost : k == 2 ? c.spore : k == 4 ? c.ratchet : c.midi)++;
             }
         };
         h (s.startIndex1, s.blockSize1);
@@ -412,6 +413,104 @@ int main (int argc, char** argv)
     }
 
     // ---------------------------------------------------------------------
+    std::printf ("\n== TRAUNFALL ==\n");
+    {
+        // onsets of a single, isolated voice: first sample above a threshold after silence
+        auto setup = [&] (bool on, float warp, float stutter, float shuffle, float fray)
+        {
+            prep (*proc, head, 0);
+            proc->clearPattern();
+            proc->setParam (id::feed, 0.0f);
+            proc->setParam (id::tfOn, on ? 1.0f : 0.0f);
+            proc->setParam (id::tfWarp, warp);
+            proc->setParam (id::tfStutter, stutter);
+            proc->setParam (id::tfShuffle, shuffle);
+            proc->setParam (id::tfFray, fray);
+            proc->setParam (id::drive, 0.0f);
+            for (int v = 0; v < numVoices; ++v) proc->setParam (voiceParamId (v, pWear), 0.0f);
+        };
+
+        // WARP: 16th hats get uneven, but every bar still starts on time.
+        // Uses the engine's own trigger clock, so it is sample-exact.
+        auto hatRun = [&] (bool on, float warp, double& spread, double& barErr)
+        {
+            setup (on, warp, 0.0f, 0.0f, 0.0f);
+            for (int st = 0; st < numSteps; ++st) proc->setStep (3, st, 1);
+            Counts c;
+            render (*proc, head, 8.0, &c);
+            const double p16 = sr * 60.0 / 120.0 / 4.0;
+            std::vector<int64_t> t;
+            for (auto& [v, tt] : c.times) if (v == 3) t.push_back (tt);
+            double mn = 1e18, mx = 0; barErr = 0.0;
+            for (size_t i = 1; i < t.size(); ++i) { mn = juce::jmin (mn, (double) (t[i] - t[i - 1])); mx = juce::jmax (mx, (double) (t[i] - t[i - 1])); }
+            for (size_t i = 0; i < t.size(); i += 16)
+                barErr = juce::jmax (barErr, std::abs ((double) (t[i] - t[0]) - (double) i * p16) / sr * 1000.0);
+            spread = (mx - mn) / p16;
+            return (int) t.size();
+        };
+        double s0, e0, s1, e1;
+        const int n0 = hatRun (false, 0.0f, s0, e0);
+        const int n1 = hatRun (true, 1.0f, s1, e1);
+        std::printf ("  hats: off %d hits, interval spread %.3f 16ths | warp 1: %d hits, spread %.2f 16ths, downbeat error %.3f ms\n",
+                     n0, s0, n1, s1, e1);
+        check (s0 < 0.01, "off: a straight grid");
+        check (s1 > 0.5, "warp: time stretches and rushes inside the bar");
+        check (e1 < 0.05, "warp: downbeats stay on the host grid");
+        check (n0 == n1, "warp: no steps lost or doubled");
+
+        // STOTTERN
+        Counts c0, c1;
+        setup (true, 0.0f, 0.0f, 0.0f, 0.0f);
+        for (int st = 0; st < numSteps; st += 2) proc->setStep (1, st, 1);
+        render (*proc, head, 8.0, &c0);
+        setup (true, 0.0f, 1.0f, 0.0f, 0.0f);
+        for (int st = 0; st < numSteps; st += 2) proc->setStep (1, st, 1);
+        render (*proc, head, 8.0, &c1);
+        std::printf ("  stutter 0: %d pattern / %d ratchet hits | stutter 1: %d / %d\n", c0.pattern, c0.ratchet, c1.pattern, c1.ratchet);
+        check (c0.ratchet == 0 && c1.ratchet > c1.pattern / 2, "ratchets appear with STOTTERN");
+
+        // ZERFASERN: hit-to-hit variation of the same step
+        auto hitSpread = [&] (float fray)
+        {
+            setup (true, 0.0f, 0.0f, 0.0f, fray);
+            for (int st = 0; st < numSteps; st += 4) proc->setStep (1, st, 1);
+            proc->setParam (voiceParamId (1, pAttack), 40.0f);   // deterministic attack, so only ZERFASERN varies it
+            const auto out = render (*proc, head, 8.0);
+            // compare the first 15 ms of consecutive hits: 1 - correlation
+            const int p4 = (int) (sr * 0.5), w = (int) (sr * 0.015);
+            const float* d = out.getReadPointer (0);
+            double acc = 0.0; int n = 0;
+            for (int i = p4; i + p4 <= out.getNumSamples(); i += p4)
+            {
+                double xy = 0, xx = 0, yy = 0;
+                for (int k = 0; k < w; ++k) { xy += d[i + k] * d[i - p4 + k]; xx += d[i + k] * d[i + k]; yy += d[i - p4 + k] * d[i - p4 + k]; }
+                acc += 1.0 - xy / std::sqrt (xx * yy + 1e-12); ++n;
+            }
+            return (float) (acc / juce::jmax (1, n));
+        };
+        const float f0 = hitSpread (0.0f), f1 = hitSpread (1.0f);
+        std::printf ("  snare attack difference hit to hit (1 - corr): fray 0 %.3f | fray 1 %.3f\n", f0, f1);
+        check (f1 > f0 * 2.0f, "ZERFASERN makes every hit different");
+
+        // UMSCHICHTEN: same steps, different order
+        Counts u;
+        setup (true, 0.0f, 0.0f, 1.0f, 0.0f);
+        proc->setStep (0, 0, 1);
+        render (*proc, head, 16.0, &u);
+        std::printf ("  one kick per bar over 8 bars, shuffle 1: %d kicks\n", u.pattern);
+        check (u.pattern >= 3 && u.pattern <= 16, "UMSCHICHTEN moves steps without flooding");
+
+        // preset render
+        const int tp = (int) presets.size() - 1;
+        prep (*proc, head, tp);
+        double cpu = 0.0;
+        const auto out = render (*proc, head, 16 * 4 * 60.0 / head.bpm, nullptr, &cpu);
+        std::printf ("  preset %s: peak %.3f rms %.4f cpu %.1f%%\n", presets[(size_t) tp].name, out.getMagnitude (0, out.getNumSamples()), rms (out), cpu * 100.0);
+        check (finite (out) && out.getMagnitude (0, out.getNumSamples()) <= 1.0f && rms (out) > 0.02f, "Traunfall preset plays cleanly");
+        writeWav (out, outDir.getChildFile ("10_traunfall_16bars.wav"));
+    }
+
+    // ---------------------------------------------------------------------
     std::printf ("\n== state round trip ==\n");
     {
         prep (*proc, head, 2);
@@ -456,7 +555,7 @@ int main (int argc, char** argv)
     std::printf ("\n== screenshot ==\n");
     {
         for (int v = 0; v < numVoices; ++v) proc->resetVoiceSample (v);
-        prep (*proc, head, 2);
+        prep (*proc, head, (int) presets.size() - 1);   // Traunfall: shows every panel active
         proc->setParam (id::kompost, 0.3f);
         proc->randomize(); proc->randomize(); proc->scrubTrail (0.6f);
         std::unique_ptr<juce::AudioProcessorEditor> ed (proc->createEditor());

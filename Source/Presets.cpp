@@ -96,6 +96,20 @@ const std::vector<PresetDef>& Presets::all()
             { { id::swing, 0.18f }, { id::feed, 0.3f }, { id::ghost, 0.55f } },
             { { S, W, 0.2f } }
         },
+        {
+            "Traunfall", 104.0f,
+            { "x..x...x.x....x.", "....x..x....x...", "..........x.....", "xxx.x.xxx.xx.x.x",
+              "......x......",    "..x.....x..x",     "x..x.x..x..x.x",   "x......x...." },
+            { { K, pPitch, -3.0f }, { K, pDecay, 0.3f }, { K, pBite, 1.2f },
+              { S, pScan, 0.6f }, { S, pSpray, 0.3f }, { S, pGrain, 12.0f },
+              { H, pGrain, 5.0f }, { H, pDensity, 400.0f }, { H, pLevel, 0.45f },
+              { W, pPitch, 7.0f }, { W, pLevel, 0.5f },
+              { G, pPitch, -12.0f }, { G, pDecay, 0.4f }, { G, pGrain, 8.0f }, { G, pLevel, 0.4f },
+              { T, pScan, 1.6f }, { T, pPitch, 5.0f } },
+            { { id::tfOn, 1.0f }, { id::tfWarp, 0.55f }, { id::tfStutter, 0.45f }, { id::tfShuffle, 0.35f },
+              { id::tfFray, 0.45f }, { id::feed, 0.3f }, { id::myzel, 0.4f }, { id::myzelDiv, 0.0f } },
+            { { S, W, 0.4f }, { H, G, 0.3f }, { K, T, 0.25f } }
+        },
     };
     return list;
 }

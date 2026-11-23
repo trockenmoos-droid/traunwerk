@@ -92,6 +92,11 @@ namespace tw
         inline constexpr const char* recover   = "recover";
         inline constexpr const char* rndAmt    = "rndAmt";
         inline constexpr const char* rndTarget = "rndTarget";
+        inline constexpr const char* tfOn      = "tfOn";
+        inline constexpr const char* tfWarp    = "tfWarp";
+        inline constexpr const char* tfStutter = "tfStutter";
+        inline constexpr const char* tfShuffle = "tfShuffle";
+        inline constexpr const char* tfFray    = "tfFray";
     }
 
     inline const juce::StringArray myzelDivNames { "1/32", "1/16T", "1/16", "1/8T", "1/8" };

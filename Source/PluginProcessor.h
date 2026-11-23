@@ -72,6 +72,11 @@ public:
     bool  isHostPlaying() const              { return hostPlayingVis.load(); }
     float getGrooveOffset (int s) const      { return grooveOffset[(size_t) s].load(); }
 
+    /** TRAUNFALL: where step s (0..16) of the current bar lands, 0..1 of the bar. */
+    float getWarpedPosition (float s) const;
+    int   getRatchetCount() const            { return ratchetCounter.load(); }
+    bool  isTraunfallOn() const              { return pTfOn->load() > 0.5f; }
+
     juce::AbstractFifo sporeFifo { 256 };
     std::array<SporeVis, 256> sporeBuf {};
 
@@ -121,6 +126,10 @@ private:
     void sandStep();
     void resetSand();
     float stepOffset (int64_t k) const;
+    double stepTime (int64_t k);                 // ppq of step k, TRAUNFALL warp included
+    void updateBar (int64_t bar);
+    VoiceSettings frayed (const VoiceSettings&);
+    static double warpCurve (double x, double a1, double a2);
 
     Snapshot capture() const;
     void applySnapshot (const Snapshot&);
@@ -148,6 +157,14 @@ private:
     bool wasRunning = false, wasInternal = false;
     double samplesPer16th = 6000.0;
     int lastThresh = 4;
+    double lastStepT = -1.0e9;
+
+    // TRAUNFALL state (audio thread)
+    int64_t tfBar = -1;
+    double warpA1 = 0.0, warpA2 = 0.0;
+    std::array<int, tw::numVoices> rotation {};
+    std::atomic<float> warpVisA1 { 0.0f }, warpVisA2 { 0.0f };
+    std::atomic<int> ratchetCounter { 0 };
 
     // editor mirrors
     std::array<std::array<std::atomic<int>, tw::numSteps>, tw::numVoices> sandVis;
@@ -168,6 +185,9 @@ private:
     std::atomic<float>* pMyzel = nullptr;  std::atomic<float>* pMyzelDiv = nullptr;
     std::atomic<float>* pKompost = nullptr; std::atomic<float>* pRecover = nullptr;
     std::atomic<float>* pRndAmt = nullptr; std::atomic<float>* pRndTarget = nullptr;
+    std::atomic<float>* pTfOn = nullptr;   std::atomic<float>* pTfWarp = nullptr;
+    std::atomic<float>* pTfStutter = nullptr; std::atomic<float>* pTfShuffle = nullptr;
+    std::atomic<float>* pTfFray = nullptr;
 
     juce::dsp::Limiter<float> limiter;
 

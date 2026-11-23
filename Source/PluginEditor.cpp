@@ -499,7 +499,8 @@ TraunwerkEditor::TraunwerkEditor (TraunwerkProcessor& p)
              { &feed, id::feed }, { &thresh, id::thresh }, { &spur, id::spur }, { &ghostK, id::ghost },
              { &myzelAmt, id::myzel }, { &kompost, id::kompost }, { &recover, id::recover },
              { &groove, id::groove }, { &swing, id::swing }, { &rndAmt, id::rndAmt },
-             { &drive, id::drive }, { &master, id::master } })
+             { &drive, id::drive }, { &master, id::master },
+             { &tfWarp, id::tfWarp }, { &tfStutter, id::tfStutter }, { &tfShuffle, id::tfShuffle }, { &tfFray, id::tfFray } })
     {
         addAndMakeVisible (*k);
         k->attach (s, pid);
@@ -520,6 +521,12 @@ TraunwerkEditor::TraunwerkEditor (TraunwerkProcessor& p)
     prevPreset.onClick = [this] { stepPreset (-1); };
     nextPreset.onClick = [this] { stepPreset (1); };
     presetName.onClick = [this] { showPresetMenu(); };
+
+    tfButton.setClickingTogglesState (true);
+    tfButton.setTooltip ("TRAUNFALL: elastic time, ratchets, reshuffled steps and frayed hits");
+    addAndMakeVisible (tfButton);
+    tfAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (s, id::tfOn, tfButton);
+    tfButton.onStateChange = [this] { repaint (tfR); };
 
     playButton.setClickingTogglesState (true);
     addAndMakeVisible (playButton);
@@ -543,7 +550,7 @@ TraunwerkEditor::TraunwerkEditor (TraunwerkProcessor& p)
     lawineButton.setTooltip ("Drop a pile of sand: forces an avalanche at the next step");
     rndButton.setTooltip ("Randomise. Every throw leaves a crumb on the trail below");
 
-    setSize (1200, 700);
+    setSize (1200, 800);
     selectVoice (proc.selectedVoice);
     refreshLabels();
     startTimerHz (30);
@@ -670,6 +677,9 @@ void TraunwerkEditor::timerCallback()
     }
     avalancheFlash *= 0.9f;
 
+    if (proc.getRatchetCount() != lastRatchetCount) { lastRatchetCount = proc.getRatchetCount(); ratchetFlash = 1.0f; }
+    ratchetFlash *= 0.85f;
+
     if (proc.getPresetChangeCount() != lastPresetCount)
     {
         refreshLabels();
@@ -681,6 +691,7 @@ void TraunwerkEditor::timerCallback()
     myzelView.repaint();
     trailView.repaint();
     repaint (lawineR);
+    repaint (tfR);
     repaint (kompostR);
     repaint (abdruckR);
     repaint (voiceR.withHeight (30));
@@ -852,6 +863,48 @@ void TraunwerkEditor::paint (juce::Graphics& g)
     }
 
     panel (g, trailR, "BROTKRUMEN", "randomizer");
+
+    // TRAUNFALL
+    {
+        const bool on = proc.isTraunfallOn();
+        panel (g, tfR, "", "");
+        g.setColour (twc::dim);
+        g.setFont (font (8.5f, 0.15f));
+        g.drawText ("Zeit, die bricht", tfR.getX() + 12, tfR.getY() + 50, 92, 14, juce::Justification::centred);
+
+        // the current bar: straight 16ths on top, where TRAUNFALL puts them below
+        const float x0 = (float) tfR.getX() + 480.0f, x1 = (float) tfR.getRight() - 20.0f;
+        const float yTop = (float) tfR.getY() + 22.0f, yBot = (float) tfR.getBottom() - 22.0f;
+        g.setColour (twc::line);
+        g.drawLine (x0, yTop, x1, yTop, 1.0f);
+        g.drawLine (x0, yBot, x1, yBot, 1.0f);
+        for (int st = 0; st <= 16; ++st)
+        {
+            const float xs = x0 + (x1 - x0) * (float) st / 16.0f;
+            const float xw = x0 + (x1 - x0) * proc.getWarpedPosition ((float) st);
+            g.setColour (twc::dim.withAlpha (st % 4 == 0 ? 0.8f : 0.4f));
+            g.drawLine (xs, yTop - 4.0f, xs, yTop + 4.0f, 1.0f);
+            g.setColour ((on ? twc::accent : twc::dim).withAlpha (on ? 0.35f : 0.15f));
+            g.drawLine (xs, yTop + 4.0f, xw, yBot - 4.0f, 1.0f);
+            g.setColour (on ? twc::accent : twc::dim.withAlpha (0.4f));
+            g.fillEllipse (xw - 2.5f, yBot - 2.5f, 5.0f, 5.0f);
+        }
+        g.setColour (twc::dim);
+        g.setFont (font (8.0f, 0.15f));
+        g.drawText ("GERADE", (int) x0 - 52, (int) yTop - 6, 46, 12, juce::Justification::centredRight);
+        g.drawText ("TRAUNFALL", (int) x0 - 62, (int) yBot - 6, 56, 12, juce::Justification::centredRight);
+        if (on && ratchetFlash > 0.05f)
+        {
+            g.setColour (twc::sand.withAlpha (ratchetFlash));
+            g.setFont (font (9.0f, 0.2f));
+            g.drawText ("STOTTERN", (int) x1 - 70, (int) yBot + 4, 70, 12, juce::Justification::centredRight);
+        }
+        if (! on)
+        {
+            g.setColour (twc::bg.withAlpha (0.45f));
+            g.fillRoundedRectangle (tfR.toFloat().withTrimmedLeft (110.0f).reduced (2.0f), 3.0f);
+        }
+    }
     panel (g, masterR, "MASTER");
 }
 
@@ -866,6 +919,7 @@ void TraunwerkEditor::resized()
     abdruckR = { 710, by, 190, bh };
     trailR   = { 908, by, 180, bh };
     masterR  = { 1096, by, 88, bh };
+    tfR      = { 16, by + bh + 8, 1168, 92 };
 
     grid.setBounds (gridR);
 
@@ -914,6 +968,11 @@ void TraunwerkEditor::resized()
     rndAmt.setBounds (trailR.getX() + 8, trailR.getY() + 66, 64, 74);
     rndTarget.setBounds (trailR.getX() + 80, trailR.getY() + 92, 90, 22);
     trailView.setBounds (trailR.getX() + 6, trailR.getY() + 156, trailR.getWidth() - 12, 80);
+
+    // TRAUNFALL
+    tfButton.setBounds (tfR.getX() + 12, tfR.getY() + 14, 92, 30);
+    Knob* tk[] { &tfWarp, &tfStutter, &tfShuffle, &tfFray };
+    for (int i = 0; i < 4; ++i) tk[i]->setBounds (tfR.getX() + 116 + i * 70, tfR.getY() + 10, 68, 74);
 
     // MASTER
     drive.setBounds (masterR.getX() + 12, masterR.getY() + 30, 64, 74);

@@ -89,6 +89,11 @@ TraunwerkProcessor::TraunwerkProcessor()
     pRecover  = apvts.getRawParameterValue (id::recover);
     pRndAmt   = apvts.getRawParameterValue (id::rndAmt);
     pRndTarget= apvts.getRawParameterValue (id::rndTarget);
+    pTfOn      = apvts.getRawParameterValue (id::tfOn);
+    pTfWarp    = apvts.getRawParameterValue (id::tfWarp);
+    pTfStutter = apvts.getRawParameterValue (id::tfStutter);
+    pTfShuffle = apvts.getRawParameterValue (id::tfShuffle);
+    pTfFray    = apvts.getRawParameterValue (id::tfFray);
 
     events.reserve (512);
     spores.reserve (256);
@@ -141,6 +146,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout TraunwerkProcessor::createLa
     f (id::rndAmt,  "Random Amount",   0.0f, 1.0f, 0.5f);
     layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::rndTarget, 1 }, "Random Target", rndTargetNames, 0));
 
+    layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::tfOn, 1 }, "Traunfall", false));
+    f (id::tfWarp,    "Traunfall Warp",     0.0f, 1.0f, 0.5f);
+    f (id::tfStutter, "Traunfall Stutter",  0.0f, 1.0f, 0.4f);
+    f (id::tfShuffle, "Traunfall Shuffle",  0.0f, 1.0f, 0.3f);
+    f (id::tfFray,    "Traunfall Fray",     0.0f, 1.0f, 0.4f);
+
     return layout;
 }
 
@@ -170,8 +181,11 @@ void TraunwerkProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     limiter.setRelease (80.0f);
     absSample = 0;
     lastStep = -1;
+    lastStepT = -1.0e9;
+    tfBar = -1;
     wasRunning = false;
     spores.clear();
+    resetSand();      // also clears pending ghost notes
 }
 
 //==============================================================================
@@ -193,6 +207,79 @@ float TraunwerkProcessor::stepOffset (int64_t k) const
     float off = (k & 1) ? pSwing->load() : 0.0f;
     off += pGroove->load() * grooveOffset[(size_t) (k % numSteps)].load();
     return juce::jlimit (-0.45f, 0.55f, off);
+}
+
+//==============================================================================
+// TRAUNFALL
+//
+// WARP bends time inside each bar: step x (0..1 of the bar) lands at
+//   w(x) = x + a1 sin(2 pi x) / (2 pi) + a2 sin(4 pi x) / (4 pi)
+// with |a1| + |a2| < 1, so w is monotonic and w(0) = 0, w(1) = 1: the bar
+// stretches and rushes inside, but every bar still starts on the host's
+// downbeat. a1 and a2 drift from bar to bar.
+double TraunwerkProcessor::warpCurve (double x, double a1, double a2)
+{
+    constexpr double twoPi = 6.283185307179586;
+    return x + a1 * std::sin (twoPi * x) / twoPi + a2 * std::sin (2.0 * twoPi * x) / (2.0 * twoPi);
+}
+
+float TraunwerkProcessor::getWarpedPosition (float s) const
+{
+    if (! isTraunfallOn()) return s / 16.0f;
+    return (float) warpCurve (s / 16.0, warpVisA1.load(), warpVisA2.load());
+}
+
+void TraunwerkProcessor::updateBar (int64_t bar)
+{
+    if (bar <= tfBar) return;      // only ever move forward: the scheduler looks ahead
+    tfBar = bar;
+
+    // WARP: random walk of the curve, bounded by the amount
+    const double limit = 0.85 * pTfWarp->load();
+    warpA1 = juce::jlimit (-limit, limit, 0.45 * warpA1 + (rng.nextDouble() * 2.0 - 1.0) * limit * 0.8);
+    const double rest = juce::jmax (0.0, limit - std::abs (warpA1));
+    warpA2 = juce::jlimit (-rest, rest, 0.45 * warpA2 + (rng.nextDouble() * 2.0 - 1.0) * rest * 0.8);
+    warpVisA1.store ((float) warpA1);
+    warpVisA2.store ((float) warpA2);
+
+    // UMSCHICHTEN: some rows read their pattern from a rotated position this bar
+    const float shuf = pTfShuffle->load();
+    for (int v = 0; v < numVoices; ++v)
+    {
+        const int len = lens[(size_t) v].load();
+        rotation[(size_t) v] = (! isLocked (v) && rng.nextFloat() < shuf * 0.5f) ? rng.nextInt (len) : 0;
+    }
+}
+
+double TraunwerkProcessor::stepTime (int64_t k)
+{
+    double pos = (double) k;
+    float offScale = 1.0f;
+    if (pTfOn->load() > 0.5f)
+    {
+        const int64_t bar = k / numSteps;
+        updateBar (bar);
+        pos = (double) (bar * numSteps) + numSteps * warpCurve ((double) (k % numSteps) / numSteps, warpA1, warpA2);
+        offScale = 1.0f - 0.7f * pTfWarp->load();
+    }
+    return (pos + stepOffset (k) * offScale) / 4.0;
+}
+
+/** ZERFASERN: every hit gets its own small variation of the sound. */
+VoiceSettings TraunwerkProcessor::frayed (const VoiceSettings& in)
+{
+    const float z = pTfFray->load();
+    if (z <= 0.0f) return in;
+    auto r = [this] { return rng.nextFloat() * 2.0f - 1.0f; };
+    VoiceSettings s = in;
+    s.pitch   += r() * z * 2.5f;
+    s.grainMs  = juce::jlimit (2.0f, 150.0f, s.grainMs * std::pow (2.0f, r() * z * 1.2f));
+    s.density  = juce::jlimit (4.0f, 600.0f, s.density * std::pow (2.0f, r() * z));
+    s.decay    = juce::jlimit (0.02f, 3.0f, s.decay * std::pow (2.0f, r() * z * 0.8f));
+    s.spray    = juce::jlimit (0.0f, 1.0f, s.spray + std::abs (r()) * z * 0.25f);
+    s.scan     = juce::jlimit (0.0f, 2.0f, s.scan * std::pow (2.0f, r() * z * 0.7f));
+    s.pan      = juce::jlimit (-1.0f, 1.0f, s.pan + r() * z * 0.3f);
+    return s;
 }
 
 void TraunwerkProcessor::resetSand()
@@ -293,7 +380,16 @@ void TraunwerkProcessor::sandStep()
 
 void TraunwerkProcessor::fire (int v, float vel, int kind, int depth, int offset)
 {
-    engine.trigger (v, vel, settings[(size_t) v], kind);
+    if (pTfOn->load() > 0.5f)
+    {
+        auto s = frayed (settings[(size_t) v]);
+        if (kind == 4) s.decay *= 0.45f;        // ratchet hits are tight
+        engine.trigger (v, vel, s, kind);
+    }
+    else
+    {
+        engine.trigger (v, vel, settings[(size_t) v], kind);
+    }
 
     const float amt = pMyzel->load();
     if (depth >= 4 || amt <= 0.0f) return;
@@ -320,13 +416,26 @@ void TraunwerkProcessor::sequencerStep (int64_t k, int offset)
     const float ghostLvl  = pGhost->load();
     const int slot = (int) (k % numSteps);
 
+    const bool tf = pTfOn->load() > 0.5f;
+    const float shuffle = pTfShuffle->load();
+    const float stutter = pTfStutter->load();
+    if (tf) updateBar (k / numSteps);   // no-op if the scheduler already moved on
+
     for (int v = 0; v < numVoices; ++v)
     {
         const int len = lens[(size_t) v].load();
         const int col = (int) (k % len);
         playCol[(size_t) v].store (col);
 
-        const int st = steps[(size_t) v][(size_t) col].load();
+        // UMSCHICHTEN: read the pattern from somewhere else in the row
+        int readCol = col;
+        if (tf && ! isLocked (v))
+        {
+            readCol = (col + rotation[(size_t) v]) % len;
+            if (rng.nextFloat() < shuffle * 0.2f) readCol = rng.nextInt (len);
+        }
+
+        const int st = steps[(size_t) v][(size_t) readCol].load();
         const float g = ghost[(size_t) v][(size_t) col];
         ghost[(size_t) v][(size_t) col] = 0.0f;
         ghostVis[(size_t) v][(size_t) col].store (0.0f);
@@ -342,7 +451,27 @@ void TraunwerkProcessor::sequencerStep (int64_t k, int offset)
             vel = g * ghostLvl;
             kind = 1;
         }
-        if (vel > 0.01f) fire (v, juce::jmin (1.0f, vel), kind, 0, offset);
+        if (vel <= 0.01f) continue;
+        vel = juce::jmin (1.0f, vel);
+        fire (v, vel, kind, 0, offset);
+
+        // STOTTERN: a burst of 2..6 hits inside this step, even, rushing or dragging
+        if (tf && stutter > 0.0f && rng.nextFloat() < stutter * (st == 2 ? 0.5f : 0.3f))
+        {
+            const int n = 2 + rng.nextInt (stutter > 0.6f ? 5 : 3);
+            const int mode = rng.nextInt (3);
+            const bool rising = rng.nextBool();
+            for (int i = 1; i < n && spores.size() < 250; ++i)
+            {
+                double t = (double) i / n;
+                if (mode == 1) t = std::pow (t, 0.6);      // rushing into the next step
+                if (mode == 2) t = std::pow (t, 1.7);      // bunched at the start
+                const float vi = rising ? vel * (0.45f + 0.55f * (float) i / (float) n)
+                                        : vel * std::pow (0.8f, (float) i);
+                spores.push_back ({ absSample + offset + (int64_t) (t * samplesPer16th), v, vi, 4, -1 });
+            }
+            ratchetCounter.fetch_add (1);
+        }
     }
 }
 
@@ -401,14 +530,20 @@ void TraunwerkProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         const double ppqPerSample = bpm / 60.0 / sr;
         const double end = ppq + n * ppqPerSample;
         if (! wasRunning || ppq < lastEndPpq - 1.0e-3 || ppq > lastEndPpq + 0.25)
+        {
             lastStep = (int64_t) std::floor (ppq * 4.0 - 1.0e-9) - 1;
+            lastStepT = -1.0e9;
+            tfBar = -1;
+        }
 
         for (int guard = 0; guard < 64; ++guard)
         {
             const int64_t k = lastStep + 1;
             if (k < 0) { lastStep = k; continue; }
-            const double T = ((double) k + stepOffset (k)) / 4.0;
+            // keep the order of steps even when warp and groove pull hard
+            const double T = juce::jmax (stepTime (k), lastStepT + 1.0e-4);
             if (T >= end) break;
+            lastStepT = T;
             const int off = juce::jlimit (0, n - 1, (int) ((T - ppq) / ppqPerSample));
             events.push_back ({ off, -1, 0.0f, 0, 0, k });
             lastStep = k;
@@ -460,9 +595,12 @@ void TraunwerkProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         {
             const auto s = spores[(size_t) sporeIdx];
             spores.erase (spores.begin() + sporeIdx);
-            fire (s.voice, s.vel, 2, s.depth, pos);
-            const auto scope = sporeFifo.write (1);
-            if (scope.blockSize1 > 0) sporeBuf[(size_t) scope.startIndex1] = { s.from, s.voice };
+            fire (s.voice, s.vel, s.from < 0 ? 4 : 2, s.depth, pos);
+            if (s.from >= 0)
+            {
+                const auto scope = sporeFifo.write (1);
+                if (scope.blockSize1 > 0) sporeBuf[(size_t) scope.startIndex1] = { s.from, s.voice };
+            }
         }
     }
     if (pos < n) engine.render (L + pos, R + pos, n - pos, settings);
@@ -754,7 +892,8 @@ void TraunwerkProcessor::applyPreset (int index)
             setParam (voiceParamId (v, q), voiceDefault (v, q));
 
     for (auto* pid : { id::master, id::drive, id::swing, id::groove, id::feed, id::thresh, id::spur,
-                       id::ghost, id::myzel, id::myzelDiv, id::kompost, id::recover })
+                       id::ghost, id::myzel, id::myzelDiv, id::kompost, id::recover,
+                       id::tfOn, id::tfWarp, id::tfStutter, id::tfShuffle, id::tfFray })
         if (auto* prm = apvts.getParameter (pid))
         {
             prm->beginChangeGesture();

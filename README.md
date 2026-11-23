@@ -22,6 +22,7 @@ wear out, and a kit that slowly feeds on its own output.
 | **MYZEL** | Threads between voices. When a voice plays, it can send a spore along each thread that sprouts into a hit after 1/32 … 1/8 (up to four generations, each weaker). Click a node, then its targets, to grow threads (each click cycles the strength); right-click a node to cut its threads. In *Myzelgeflecht*, 4 seeded hits per bar grow ~3 more. |
 | **ABDRUCK** | Load any recording. TRAUNWERK finds the hits, takes **a kit** (one slice per voice, chosen by brightness), **a groove** (micro-timing and accents per 16th) and **a pattern skeleton** (KICK / SNARE / HAT from the low, mid and high energy per step). Measured: tempo within 0.3 %. A 20 % swing comes back as 0.12–0.20 (deliberately conservative, see below). The pattern is a starting point, not a transcription. Busy, very granular material gives a looser skeleton, and offsets the hits don't agree on get pulled towards zero. |
 | **BROTKRUMEN** | WÜRFELN randomises pattern (MUSTER), sound (KLANG) or both plus the network (ALLES), using musical templates per voice. Every throw leaves a crumb on the trail. Drag along the trail to **morph** between crumbs (sound blends continuously, steps switch half-way). |
+| **TRAUNFALL** (switchable) | Time that breaks, named after the Traun rapids that salt boats once had to shoot. **WARP** bends time inside each bar: the 16ths stretch and rush along a curve that changes from bar to bar, while every downbeat stays exactly on the host grid (measured: 0.02 ms error, no steps lost or doubled). **STOTTERN** turns hits into ratchets of 2–6, even, rushing or bunched, rising or fading. **UMSCHICHTEN** makes rows read their pattern from shifted or random positions. **ZERFASERN** gives every hit its own small variation of pitch, grain, density, decay, scan and pan. Off = exactly the straight machine. The display shows the straight grid above the bent one. |
 | **SCHUTZ** | The padlock on each row protects a voice from the randomizer, the trail, erosion and Abdruck. Sand doesn't fall there either. |
 | **Polymeter** | Each row has its own length (shift-click a step, or right-click → length). |
 
@@ -35,7 +36,7 @@ wear out, and a kit that slowly feeds on its own output.
 - MIDI notes trigger the voices: GM map KICK 36, SNARE 38, CLAP 39, HAT 42, OPEN 46, TOM 45, HOLZ 37, GLOCKE 56. Any other note plays voice `(note − 36) mod 8`. Velocity is respected. HAT chokes OPEN.
 
 ### Presets
-Init · Moos Minimal · Trommelweiber · Sägewerk Steeg · Glöckler · Lawinenhang · Myzelgeflecht · Kompost · Krippenstein Breaks
+Init · Moos Minimal · Trommelweiber · Sägewerk Steeg · Glöckler · Lawinenhang · Myzelgeflecht · Kompost · Krippenstein Breaks · Traunfall
 
 The built-in kit is synthesised in code, so there are no sample files to ship. Loaded samples are referenced by path in the project, not embedded.
 
@@ -55,7 +56,7 @@ cmake -B build -DTRAUNWERK_BUILD_TESTS=ON && cmake --build build --target Traunw
 ./build/TraunwerkRender_artefacts/Release/TraunwerkRender render
 ```
 
-Renders every preset through a simulated host transport and checks level, stability and CPU. Then it measures each feature against a control (with/without ANSCHLAG, wear 0/1, feed 0/0.6, Myzel 0/0.85, Kompost 0/0.9, the trail round trip, Abdruck on its own render and on a swung loop, the state round trip, a 3-minute torture run). It also writes demo WAVs and the screenshot above. It runs in CI on Linux. CPU per preset in the test: 1–4 % of one core.
+Renders every preset through a simulated host transport and checks level, stability and CPU. Then it measures each feature against a control (with/without ANSCHLAG, wear 0/1, feed 0/0.6, Myzel 0/0.85, Kompost 0/0.9, the trail round trip, TRAUNFALL timing measured sample-exact on the engine's own trigger clock, Abdruck on its own render and on a swung loop, the state round trip, a 3-minute torture run). It also writes demo WAVs and the screenshot above. It runs in CI on Linux. CPU per preset in the test: 1–4 % of one core.
 
 ## Credits
 

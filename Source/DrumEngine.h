@@ -35,7 +35,8 @@ struct HitInfo
 {
     int   voice;
     float velocity;
-    int   kind;     // 0 pattern, 1 lawine ghost, 2 myzel spore, 3 midi / audition
+    int   kind;     // 0 pattern, 1 lawine ghost, 2 myzel spore, 3 midi / audition, 4 traunfall ratchet
+    int64_t time;   // engine sample clock at the trigger
 };
 
 /** Eight granular drum voices.
@@ -154,6 +155,7 @@ private:
     std::array<std::atomic<float>, tw::numVoices> wearVis;
     std::array<float, tw::numVoices> driftDir {};
     uint32_t serialCounter = 0;
+    int64_t renderedSamples = 0;
 
     // per voice stereo work buffers + filter state
     juce::AudioBuffer<float> voiceBuf;
@@ -175,5 +177,5 @@ private:
     int   lastBin = -1;
 
     std::array<float, 1024> window {};
-    juce::Random rng;
+    juce::Random rng { 0x9a1e };   // fixed seed: reproducible renders (the music is still random)
 };

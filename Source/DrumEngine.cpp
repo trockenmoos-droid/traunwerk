@@ -195,7 +195,7 @@ void DrumEngine::trigger (int v, float velocity, const VoiceSettings& s, int kin
     // weathering
     wear[(size_t) v] = juce::jmin (1.0f, w + s.wear * (0.12f + 0.2f * vel) * (1.0f - w));
 
-    pushHit ({ v, vel, kind });
+    pushHit ({ v, vel, kind, renderedSamples });
 }
 
 void DrumEngine::spawnGrain (Hit& h)
@@ -449,4 +449,5 @@ void DrumEngine::render (float* L, float* R, int numSamples,
 
         done += n;
     }
+    renderedSamples += numSamples;
 }

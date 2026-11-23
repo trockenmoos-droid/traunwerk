@@ -150,6 +150,9 @@ private:
     Knob groove { "GROOVE" }, swing { "SWING" };
     Knob rndAmt { "MENGE" };
     Knob drive { "DRIVE" }, master { "MASTER" };
+    Knob tfWarp { "WARP" }, tfStutter { "STOTTERN" }, tfShuffle { "UMSCHICHTEN" }, tfFray { "ZERFASERN" };
+    juce::TextButton tfButton { "TRAUNFALL" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> tfAtt;
 
     juce::ComboBox myzelDiv, rndTarget;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> myzelDivAtt, rndTargetAtt;
@@ -165,10 +168,12 @@ private:
 
     std::unique_ptr<juce::FileChooser> chooser;
 
-    juce::Rectangle<int> lawineR, myzelR, kompostR, abdruckR, trailR, masterR, voiceR, gridR;
+    juce::Rectangle<int> tfR, lawineR, myzelR, kompostR, abdruckR, trailR, masterR, voiceR, gridR;
     int lastPresetCount = -1;
     int lastAvalancheCount = 0;
     float avalancheFlash = 0.0f;
+    int lastRatchetCount = 0;
+    float ratchetFlash = 0.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TraunwerkEditor)
 };
