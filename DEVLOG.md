@@ -120,4 +120,4 @@ sequencer was missing: control over time itself.
 | BROTKRUMEN | 6 crumbs after 5 throws, exact return to crumb 0 |
 | ABDRUCK | 124.1 bpm (true 124); swing 0.20 → 0.12–0.20 over six runs |
 | 3 min torture run | finite, level constant, 7 % CPU |
-| TRAUNFALL | downbeats ±0.02 ms, 64/64 steps; STOTTERN 1: 47 ratchet hits on 32 steps; ZERFASERN: attack difference 0.00 → 0.2–0.4 |
+| TRAUNFALL | downbeats ±0.02 ms, 64/64 steps; STOTTERN 1: 47 ratchet hits on 32 steps; ZERFASERN: attack difference 0.00 → 0.2–0.55 |
