@@ -1,0 +1,91 @@
+name: build
+
+# Builds TRAUNWERK on all three platforms and uploads the plugins as artifacts.
+# Push a tag like v0.2.0 to also attach them to a GitHub release.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: Windows
+          - os: macos-latest
+            name: macOS
+          - os: ubuntu-22.04
+            name: Linux
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev libjack-jackd2-dev libfreetype6-dev libfontconfig1-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev \
+            libxrandr-dev libxrender-dev libglu1-mesa-dev mesa-common-dev ninja-build
+
+      - name: Cache JUCE
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: ${{ runner.os }}-juce-8.0.4
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCOPY_PLUGIN_AFTER_BUILD=OFF
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+
+      # The artefacts folder holds one subfolder per format.
+      - name: Collect
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp -R build/Traunwerk_artefacts/Release/* dist/ 2>/dev/null || \
+          cp -R build/Traunwerk_artefacts/* dist/
+          rm -rf dist/Standalone 2>/dev/null || true
+
+      # Linux also runs the offline render test: every preset and every
+      # feature is measured against a control (see tests/RenderTest.cpp).
+      - name: Render test
+        if: runner.os == 'Linux'
+        run: |
+          cmake -B build-test -G Ninja -DCMAKE_BUILD_TYPE=Release -DTRAUNWERK_BUILD_TESTS=ON -DCOPY_PLUGIN_AFTER_BUILD=OFF
+          cmake --build build-test --target TraunwerkRender --parallel 4
+          ./build-test/TraunwerkRender_artefacts/Release/TraunwerkRender render
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Traunwerk-${{ matrix.name }}
+          path: dist/
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Zip per platform
+        run: |
+          cd artifacts
+          for d in */; do zip -r "../${d%/}.zip" "$d"; done
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: '*.zip'

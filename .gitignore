@@ -1,0 +1,6 @@
+build/
+*.vst3
+*.lv2
+.DS_Store
+render/
+build-test/
